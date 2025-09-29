@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: nebula-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "123150.wangzai7"
+      MYSQL_DATABASE: "nebula_manager"
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql-data:/var/lib/mysql
+
+  app:
+    image: 24802117/nebula_manager:latest
+    container_name: nebula-manager
+    depends_on:
+      - mysql
+    environment:
+      NEBULA_MYSQL_DSN: "root:123150.wangzai7@tcp(mysql:3306)/nebula_manager?charset=utf8mb4&parseTime=True&loc=Local"
+      NEBULA_DATA_DIR: "/data"
+      NEBULA_SERVER_PORT: "8080"
+      NEBULA_API_BASE: "http://nebula-manager:8080"
+      NEBULA_BINARY_VERSION: "1.9.3"
+      NEBULA_BINARY_BASE: "https://github.com/slackhq/nebula/releases/download"
+      NEBULA_BINARY_PROXY_PREFIX: "https://proxy.529851.xyz/"
+      NEBULA_ADMIN_USERNAME: "admin"
+      NEBULA_ADMIN_PASSWORD: "admin123"
+      NEBULA_SESSION_SECRET: "change-me"
+      NEBULA_STATIC_TOKEN: "yjkj02"
+    ports:
+      - "18001:8080"
+    volumes:
+      - ./app-data:/data

@@ -1,0 +1,15 @@
+# Go build artifacts
+bin/
+*.exe
+*.log
+*.out
+data/
+
+# Node modules
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+*.iml
+.vscode/
+.idea/
