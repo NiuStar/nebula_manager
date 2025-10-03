@@ -15,7 +15,7 @@ Nebula Manager 是一个基于 Go（Gin + Gorm + MySQL）和 Vue 3 的 Nebula �
 1. 在项目根目录（`/Volumes/code/go_work/src/nebula_manager`）创建 `.env`（可选）：
    ```bash
    cat <<'ENV' > .env
-   NEBULA_MYSQL_DSN="root:123150.wangzai7@tcp(10.10.10.9:3306)/nebula_manager?charset=utf8mb4&parseTime=True&loc=Local"
+   NEBULA_MYSQL_DSN="root:123150.wangzai7@tcp(10.10.10.1:3306)/nebula_manager?charset=utf8mb4&parseTime=True&loc=Local"
    NEBULA_SERVER_PORT=8080
    NEBULA_DATA_DIR=data
    NEBULA_API_BASE="http://localhost:8080"
@@ -32,7 +32,7 @@ Nebula Manager 是一个基于 Go（Gin + Gorm + MySQL）和 Vue 3 的 Nebula �
    ```
 2. 或者直接在终端导出变量：
    ```bash
-   export NEBULA_MYSQL_DSN="root:123150.wangzai7@tcp(10.10.10.9:3306)/nebula_manager?charset=utf8mb4&parseTime=True&loc=Local"
+   export NEBULA_MYSQL_DSN="root:123150.wangzai7@tcp(10.10.10.1:3306)/nebula_manager?charset=utf8mb4&parseTime=True&loc=Local"
    export NEBULA_SERVER_PORT=8080
    export NEBULA_DATA_DIR=data
    export NEBULA_API_BASE="http://localhost:8080"
@@ -195,3 +195,99 @@ npm run dev
 - 运行脚本时如提示权限不足，可在命令前加 `sudo`。
 
 按以上步骤，即可完成后端 API 与前端控制台的部署，并通过 Web UI 快速生成灯塔节点与普通节点的证书、配置和安装脚本，实现 Nebula 组网的集中管理。
+
+---
+
+## 节点间网络质量采集
+
+为实现“节点 ↔ 节点”级别的延迟监控，需要在每个节点上部署一个轻量探针脚本，由节点自行对其他节点发起 `ping` 并把结果上报到控制面板。后端已提供以下接口：
+
+- `GET  /api/nodes/:id/network?range=1h|6h|24h`：查询指定节点在最近一段时间内对其它节点的延迟曲线（前端图表使用的接口，不需要额外操作）。
+- `POST /api/nodes/:id/network/samples`：由节点自报数据，JSON 请求体形如：
+  ```json
+  {
+    "samples": [
+      {"peer_id": 2, "latency_ms": 23.7, "success": true, "timestamp": "2024-11-27T10:15:00Z"},
+      {"peer_id": 3, "latency_ms": 0, "success": false, "timestamp": "2024-11-27T10:15:02Z"}
+    ]
+  }
+  ```
+  - `peer_id`：被测节点在控制面板中的 ID。
+  - `latency_ms`：以毫秒为单位的往返延迟，失败时可置为 0。
+  - `success`：本次探测是否成功。
+  - `timestamp`：ISO8601 / RFC3339 格式时间戳，可选；未提供时后端会使用接收时间。
+- `GET /api/nodes/:id/network/targets`：返回推荐的探测目标（包含节点 ID、名称与地址），便于探针自动获取最新列表。
+
+### 推荐的探针部署方式
+
+通过安装命令部署节点时，脚本会自动：
+
+1. 下载并安装 `/usr/local/bin/nebula-network-agent.sh`；
+2. 写入 `/etc/nebula/nebula-network-agent.env`（自动使用后端 `NEBULA_API_BASE` 以及 `NEBULA_STATIC_TOKEN`，若存在）；
+3. 安装 `nebula-net-probe.service` 和 `nebula-net-probe.timer`，默认每分钟上报一次，并在每次执行前通过 `GET /api/nodes/:id/network/targets` 自动同步最新节点列表（如需固定目标可设置 `NEBULA_DYNAMIC_TARGETS=0`）。
+
+若控制端未配置 `NEBULA_STATIC_TOKEN`，请在执行安装命令前导出 `NEBULA_ACCESS_TOKEN`，或稍后补充后运行：
+
+```bash
+sudo tee /etc/nebula/nebula-network-agent.env <<'ENV'
+NEBULA_MANAGER_API="https://controller.example.com"
+NEBULA_ACCESS_TOKEN="<token>"
+NEBULA_NODE_ID=<your-node-id>
+NEBULA_PEERS="2:10.10.0.12,3:10.10.0.13"
+ENV
+
+sudo systemctl enable --now nebula-net-probe.timer
+```
+
+仓库仍提供一个可独立运行的脚本 `scripts/node-network-agent.sh`，便于手动或自定义部署：
+
+```bash
+export NEBULA_MANAGER_API="https://controller.example.com"          # 控制面板地址
+export NEBULA_ACCESS_TOKEN="<静态 token 或登录获得的 token>"
+export NEBULA_NODE_ID=1                                              # 当前节点 ID
+export NEBULA_PEERS="2:10.10.0.12,3:10.10.0.13"                     # 目标 ID:IP 列表
+
+/opt/nebula/node-network-agent.sh
+```
+
+脚本要点：
+- 使用 `ping` 测试每个目标（默认 1 包，3 秒超时，可通过 `NEBULA_AGENT_PING_COUNT` 与 `NEBULA_AGENT_PING_TIMEOUT` 调整）。
+- 默认会拉取 `GET /api/nodes/:id/network/targets`，实时刷新 `NEBULA_PEERS`（可设置 `NEBULA_DYNAMIC_TARGETS=0` 关闭）；
+- 自动组装上报格式并调用 `POST /api/nodes/:id/network/samples`。
+- 推荐使用全局 `NEBULA_STATIC_TOKEN` 作为访问凭据，避免会话 token 过期导致探针上报失败。
+- 支持在 Nebula overlay 内使用子网 IP 直接探测，也可以配置公网地址或任意可达的探测目标。
+
+示例 systemd timer：
+
+```ini
+# /etc/systemd/system/nebula-net-probe.service
+[Unit]
+Description=Nebula node latency reporter
+
+[Service]
+Type=oneshot
+Environment=NEBULA_MANAGER_API=https://controller.example.com
+Environment=NEBULA_ACCESS_TOKEN=<token>
+Environment=NEBULA_NODE_ID=1
+Environment=NEBULA_PEERS=2:10.10.0.12,3:10.10.0.13
+ExecStart=/opt/nebula/node-network-agent.sh
+
+# /etc/systemd/system/nebula-net-probe.timer
+[Unit]
+Description=Run Nebula latency reporter every minute
+
+[Timer]
+OnUnitActiveSec=60s
+Unit=nebula-net-probe.service
+
+[Install]
+WantedBy=timers.target
+```
+
+启用：
+
+```bash
+sudo systemctl enable --now nebula-net-probe.timer
+```
+
+只要各节点按计划上报，前端“网络情况”页面即可展示真实的节点间延迟曲线，并在表格中列出最近一次探测的结果。

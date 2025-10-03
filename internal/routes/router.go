@@ -63,6 +63,9 @@ func New(deps Dependencies, staticDir string) *gin.Engine {
 	protected.GET("/nodes/:id/config", deps.Nodes.Config)
 	protected.GET("/nodes/:id/install-script", deps.Nodes.InstallScript)
 	protected.GET("/nodes/:id/bundle", deps.Nodes.Bundle)
+	protected.GET("/nodes/:id/network", deps.Nodes.NetworkStatus)
+	protected.GET("/nodes/:id/network/targets", deps.Nodes.NetworkTargets)
+	protected.POST("/nodes/:id/network/samples", deps.Nodes.SubmitNetworkSamples)
 	protected.DELETE("/nodes/:id", deps.Nodes.Delete)
 	protected.GET("/me", deps.Auth.Profile)
 

@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -120,10 +121,82 @@ func (h *NodeHandler) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": "ok"})
 }
 
+// NetworkStatus returns latency series data for a node.
+func (h *NodeHandler) NetworkStatus(c *gin.Context) {
+	id, err := parseUintParam(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid node id"})
+		return
+	}
+
+	span := parseRangeParam(c.Query("range"))
+	series, err := h.service.GetNetworkSeries(id, span)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": series})
+}
+
+// SubmitNetworkSamples stores latency data reported by a node agent.
+func (h *NodeHandler) SubmitNetworkSamples(c *gin.Context) {
+	id, err := parseUintParam(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid node id"})
+		return
+	}
+
+	var req struct {
+		Samples []services.NetworkSampleInput `json:"samples" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.RecordNetworkSamples(id, req.Samples); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": "ok"})
+}
+
+// NetworkTargets lists recommended probe targets for the node agent.
+func (h *NodeHandler) NetworkTargets(c *gin.Context) {
+	id, err := parseUintParam(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid node id"})
+		return
+	}
+
+	targets, err := h.service.ListNetworkTargets(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": targets})
+}
+
 func parseUintParam(val string) (uint, error) {
 	parsed, err := strconv.ParseUint(val, 10, 64)
 	if err != nil {
 		return 0, err
 	}
 	return uint(parsed), nil
+}
+
+func parseRangeParam(val string) time.Duration {
+	switch val {
+	case "6h":
+		return 6 * time.Hour
+	case "24h":
+		return 24 * time.Hour
+	case "1h", "":
+		return time.Hour
+	default:
+		return time.Hour
+	}
 }

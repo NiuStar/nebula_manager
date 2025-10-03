@@ -64,7 +64,7 @@ func Load() *Config {
 
 		cfg = &Config{
 			ServerPort:          serverPort,
-			DatabaseDSN:         fallback(os.Getenv("NEBULA_MYSQL_DSN"), "root:123150.wangzai7@tcp(47.109.89.95:23006)/nebula_manager?charset=utf8mb4&parseTime=True&loc=Local"),
+			DatabaseDSN:         fallback(os.Getenv("NEBULA_MYSQL_DSN"), "root:123150.wangzai7@tcp(10.10.10.1:3306)/nebula_manager?charset=utf8mb4&parseTime=True&loc=Local"),
 			DataDir:             filepath.Clean(dataDir),
 			DefaultSubnet:       os.Getenv("NEBULA_DEFAULT_SUBNET"),
 			EnableAutoMigrate:   os.Getenv("NEBULA_AUTO_MIGRATE") != "false",

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -18,6 +19,7 @@ import (
 
 	"nebula_manager/internal/models"
 	"nebula_manager/internal/utils"
+	agentassets "nebula_manager/scripts"
 )
 
 const (
@@ -289,11 +291,26 @@ func (s *NodeService) GenerateInstallScript(id uint) (string, error) {
 		return "", err
 	}
 
+	targets, err := s.ListNetworkTargets(node.ID)
+	if err != nil {
+		return "", err
+	}
+	peerPairs := make([]string, 0, len(targets))
+	for _, t := range targets {
+		if t.Address == "" {
+			continue
+		}
+		peerPairs = append(peerPairs, fmt.Sprintf("%d:%s", t.PeerID, t.Address))
+	}
+	peerList := strings.Join(peerPairs, ",")
 	apiBase := s.apiBaseURL
 	if apiBase == "" {
 		apiBase = "http://localhost:8080"
 	}
 	apiBase = strings.TrimRight(apiBase, "/")
+	agentAPIEsc := escapeForDoubleQuotes(apiBase)
+	staticToken := strings.TrimSpace(s.staticToken)
+	staticTokenEsc := escapeForDoubleQuotes(staticToken)
 	nebulaBase := s.nebulaBaseURL
 	if nebulaBase == "" {
 		nebulaBase = "https://github.com/slackhq/nebula/releases/download"
@@ -304,6 +321,7 @@ func (s *NodeService) GenerateInstallScript(id uint) (string, error) {
 		nebulaVersion = "1.9.3"
 	}
 	proxyPrefix := s.proxyPrefixForNode(node)
+	peerListEscaped := escapeForDoubleQuotes(peerList)
 
 	var b strings.Builder
 	b.WriteString("#!/bin/bash\n")
@@ -385,8 +403,61 @@ func (s *NodeService) GenerateInstallScript(id uint) (string, error) {
 	b.WriteString("[Install]\n")
 	b.WriteString("WantedBy=multi-user.target\n")
 	b.WriteString("UNIT\n")
+	b.WriteString("AGENT_SCRIPT=/usr/local/bin/nebula-network-agent.sh\n")
+	b.WriteString("AGENT_ENV=/etc/nebula/nebula-network-agent.env\n")
+	b.WriteString("sudo tee \"$AGENT_SCRIPT\" >/dev/null <<'AGENT'\n")
+	b.WriteString(agentassets.NetworkAgentScript)
+	b.WriteString("\nAGENT\n")
+	b.WriteString("sudo chmod +x \"$AGENT_SCRIPT\"\n")
+	if staticToken != "" {
+		b.WriteString("sudo tee \"$AGENT_ENV\" >/dev/null <<ENV\n")
+		b.WriteString(fmt.Sprintf("NEBULA_MANAGER_API=\"%s\"\n", agentAPIEsc))
+		b.WriteString(fmt.Sprintf("NEBULA_ACCESS_TOKEN=\"%s\"\n", staticTokenEsc))
+		b.WriteString("NEBULA_NODE_ID=$NODE_ID\n")
+		b.WriteString(fmt.Sprintf("NEBULA_PEERS=\"%s\"\n", peerListEscaped))
+		b.WriteString("ENV\n")
+	} else {
+		b.WriteString("if [[ -z \"${NEBULA_ACCESS_TOKEN:-}\" ]]; then\n")
+		b.WriteString("  echo '未设置 NEBULA_ACCESS_TOKEN，已跳过网络探针配置；请在配置 token 后重启 nebula-net-probe.timer' >&2\n")
+		b.WriteString("else\n")
+		b.WriteString("  TOKEN_ESCAPED=$(printf '%s' \"$NEBULA_ACCESS_TOKEN\" | sed 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g')\n")
+		b.WriteString("  sudo tee \"$AGENT_ENV\" >/dev/null <<ENV\n")
+		b.WriteString(fmt.Sprintf("NEBULA_MANAGER_API=\"%s\"\n", agentAPIEsc))
+		b.WriteString("NEBULA_ACCESS_TOKEN=\"$TOKEN_ESCAPED\"\n")
+		b.WriteString("NEBULA_NODE_ID=$NODE_ID\n")
+		b.WriteString(fmt.Sprintf("NEBULA_PEERS=\"%s\"\n", peerListEscaped))
+		b.WriteString("ENV\n")
+		b.WriteString("fi\n")
+	}
+	b.WriteString("sudo tee /etc/systemd/system/nebula-net-probe.service >/dev/null <<'UNIT'\n")
+	b.WriteString("[Unit]\n")
+	b.WriteString("Description=Nebula node latency reporter\n")
+	b.WriteString("After=network-online.target\n\n")
+	b.WriteString("[Service]\n")
+	b.WriteString("Type=oneshot\n")
+	b.WriteString("EnvironmentFile=-/etc/nebula/nebula-network-agent.env\n")
+	b.WriteString("ExecStart=/usr/local/bin/nebula-network-agent.sh\n")
+	b.WriteString("UNIT\n")
+	b.WriteString("sudo tee /etc/systemd/system/nebula-net-probe.timer >/dev/null <<'UNIT'\n")
+	b.WriteString("[Unit]\n")
+	b.WriteString("Description=Schedule Nebula latency reporter\n\n")
+	b.WriteString("[Timer]\n")
+	b.WriteString("OnBootSec=60s\n")
+	b.WriteString("OnUnitActiveSec=60s\n")
+	b.WriteString("AccuracySec=10s\n")
+	b.WriteString("Persistent=true\n")
+	b.WriteString("Unit=nebula-net-probe.service\n\n")
+	b.WriteString("[Install]\n")
+	b.WriteString("WantedBy=timers.target\n")
+	b.WriteString("UNIT\n")
 	b.WriteString("sudo systemctl daemon-reload\n")
 	b.WriteString("sudo systemctl enable --now nebula.service\n")
+	b.WriteString("if [[ -f \"$AGENT_ENV\" ]]; then\n")
+	b.WriteString("  sudo systemctl enable --now nebula-net-probe.timer\n")
+	b.WriteString("  echo 'Nebula 网络探针已安装并启用 (nebula-net-probe.timer)'\n")
+	b.WriteString("else\n")
+	b.WriteString("  echo '未写入网络探针配置，可在设置 NEBULA_ACCESS_TOKEN 后运行 sudo systemctl enable --now nebula-net-probe.timer'\n")
+	b.WriteString("fi\n")
 	b.WriteString("echo \"Nebula 节点已部署并以 systemd 服务运行\"\n")
 	b.WriteString("sudo systemctl status nebula.service --no-pager\n")
 
@@ -621,6 +692,211 @@ func (s *NodeService) writeArtifacts(node *models.Node, caCert string) error {
 		}
 	}
 	return nil
+}
+
+// NodeSummary provides compact metadata about a managed node.
+type NodeSummary struct {
+	ID       uint   `json:"id"`
+	Name     string `json:"name"`
+	SubnetIP string `json:"subnet_ip,omitempty"`
+	PublicIP string `json:"public_ip,omitempty"`
+}
+
+// NetworkTarget describes a probe target for latency sampling.
+type NetworkTarget struct {
+	PeerID  uint   `json:"peer_id"`
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
+// PingPoint represents a single latency sample between two nodes.
+type PingPoint struct {
+	Timestamp time.Time `json:"timestamp"`
+	LatencyMs float64   `json:"latency_ms"`
+	Success   bool      `json:"success"`
+}
+
+// NodePeerSeries aggregates samples for a given peer node.
+type NodePeerSeries struct {
+	Peer   NodeSummary `json:"peer"`
+	Points []PingPoint `json:"points"`
+}
+
+// NodeNetworkSeries contains all peer series for a source node.
+type NodeNetworkSeries struct {
+	Node  NodeSummary      `json:"node"`
+	Peers []NodePeerSeries `json:"peers"`
+}
+
+// NetworkSampleInput captures metrics reported by an agent running on a node.
+type NetworkSampleInput struct {
+	PeerID    uint    `json:"peer_id" binding:"required"`
+	LatencyMs float64 `json:"latency_ms"`
+	Success   bool    `json:"success"`
+	Timestamp string  `json:"timestamp"`
+}
+
+// GetNetworkSeries returns latency samples for the given node ID and time span.
+func (s *NodeService) GetNetworkSeries(nodeID uint, span time.Duration) (*NodeNetworkSeries, error) {
+	if span <= 0 {
+		span = time.Hour
+	}
+
+	node, err := s.getNode(nodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	var peers []models.Node
+	if err := s.db.Where("id <> ?", nodeID).Find(&peers).Error; err != nil {
+		return nil, err
+	}
+
+	from := time.Now().Add(-span)
+	var records []models.NodePing
+	if err := s.db.Where("node_id = ? AND created_at >= ?", nodeID, from).Order("created_at asc").Find(&records).Error; err != nil {
+		return nil, err
+	}
+
+	grouped := make(map[uint][]PingPoint)
+	for _, rec := range records {
+		grouped[rec.PeerNodeID] = append(grouped[rec.PeerNodeID], PingPoint{
+			Timestamp: rec.CreatedAt,
+			LatencyMs: rec.LatencyMs,
+			Success:   rec.Success,
+		})
+	}
+
+	series := make([]NodePeerSeries, 0, len(peers))
+	for _, peer := range peers {
+		series = append(series, NodePeerSeries{
+			Peer:   toNodeSummary(peer),
+			Points: grouped[peer.ID],
+		})
+	}
+
+	sort.Slice(series, func(i, j int) bool {
+		return strings.ToLower(series[i].Peer.Name) < strings.ToLower(series[j].Peer.Name)
+	})
+
+	return &NodeNetworkSeries{
+		Node:  toNodeSummary(*node),
+		Peers: series,
+	}, nil
+}
+
+// RecordNetworkSamples persists latency samples reported by a node agent.
+func (s *NodeService) RecordNetworkSamples(nodeID uint, samples []NetworkSampleInput) error {
+	if len(samples) == 0 {
+		return nil
+	}
+
+	if _, err := s.getNode(nodeID); err != nil {
+		return err
+	}
+
+	peerIDs := make(map[uint]struct{})
+	for _, sample := range samples {
+		if sample.PeerID == 0 || sample.PeerID == nodeID {
+			continue
+		}
+		peerIDs[sample.PeerID] = struct{}{}
+	}
+
+	if len(peerIDs) == 0 {
+		return nil
+	}
+
+	ids := make([]uint, 0, len(peerIDs))
+	for id := range peerIDs {
+		ids = append(ids, id)
+	}
+
+	var existing []models.Node
+	if err := s.db.Where("id IN ?", ids).Find(&existing).Error; err != nil {
+		return err
+	}
+
+	exists := make(map[uint]bool, len(existing))
+	for _, peer := range existing {
+		exists[peer.ID] = true
+	}
+
+	entries := make([]models.NodePing, 0, len(samples))
+	now := time.Now()
+
+	for _, sample := range samples {
+		if sample.PeerID == 0 || sample.PeerID == nodeID {
+			continue
+		}
+		if !exists[sample.PeerID] {
+			return fmt.Errorf("peer node %d not found", sample.PeerID)
+		}
+		ts := now
+		if sample.Timestamp != "" {
+			if parsed, err := time.Parse(time.RFC3339, sample.Timestamp); err == nil {
+				ts = parsed
+			}
+		}
+		entries = append(entries, models.NodePing{
+			NodeID:     nodeID,
+			PeerNodeID: sample.PeerID,
+			LatencyMs:  sample.LatencyMs,
+			Success:    sample.Success,
+			CreatedAt:  ts,
+		})
+	}
+
+	if len(entries) == 0 {
+		return nil
+	}
+
+	return s.db.Create(&entries).Error
+}
+
+func toNodeSummary(node models.Node) NodeSummary {
+	return NodeSummary{
+		ID:       node.ID,
+		Name:     node.Name,
+		SubnetIP: strings.TrimSpace(node.SubnetIP),
+		PublicIP: strings.TrimSpace(node.PublicIP),
+	}
+}
+
+// ListNetworkTargets returns candidate probe targets for the given node.
+func (s *NodeService) ListNetworkTargets(nodeID uint) ([]NetworkTarget, error) {
+	var peers []models.Node
+	if err := s.db.Where("id <> ?", nodeID).Order("name asc").Find(&peers).Error; err != nil {
+		return nil, err
+	}
+
+	targets := make([]NetworkTarget, 0, len(peers))
+	for _, peer := range peers {
+		addr := preferredAddress(peer)
+		if addr == "" {
+			continue
+		}
+		targets = append(targets, NetworkTarget{
+			PeerID:  peer.ID,
+			Name:    peer.Name,
+			Address: addr,
+		})
+	}
+
+	return targets, nil
+}
+
+func preferredAddress(node models.Node) string {
+	if val := strings.TrimSpace(node.SubnetHost); val != "" {
+		return val
+	}
+	if val := strings.TrimSpace(node.SubnetIP); val != "" {
+		return val
+	}
+	if val := strings.TrimSpace(node.PublicIP); val != "" {
+		return val
+	}
+	return ""
 }
 
 func renderTemplate(tpl string, data map[string]any) (string, error) {

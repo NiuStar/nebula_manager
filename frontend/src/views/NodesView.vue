@@ -78,6 +78,7 @@
               </div>
             </td>
             <td class="actions">
+              <button class="btn secondary" type="button" @click="viewNetwork(node)">网络情况</button>
               <button class="btn secondary" type="button" @click="downloadBundle(node.id)">下载归档</button>
               <button class="btn danger" type="button" @click="removeNode(node)">删除</button>
             </td>
@@ -93,10 +94,12 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { createNode, deleteNode, downloadNodeBundle, listNodes } from '../api';
 
 const nodes = ref([]);
 const tags = ref('');
+const router = useRouter();
 
 const form = reactive({
   name: '',
@@ -200,6 +203,10 @@ async function removeNode(node) {
   } catch (err) {
     window.alert(err.response?.data?.error || '删除失败');
   }
+}
+
+function viewNetwork(node) {
+  router.push({ name: 'node-network', params: { id: node.id } });
 }
 
 onMounted(fetchNodes);
