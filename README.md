@@ -292,6 +292,18 @@ export NEBULA_PEERS="2:10.10.0.12,3:10.10.0.13"                     # 目标 ID:
 - 支持在 Nebula overlay 内使用子网 IP 直接探测，也可以配置公网地址或任意可达的探测目标。
 - 脚本依赖 `python3` 用于解析 `/proc` 指标，若节点缺少 python 会提示“跳过运行状态上报”。
 
+---
+
+## 界面预览
+
+Demo 体验地址：<https://nebula.529851.xyz/status>
+
+![Dashboard](images/home.png)
+
+![Nodes](images/list.png)
+
+![Network](images/network.png)
+
 示例 systemd timer：
 
 ```ini
