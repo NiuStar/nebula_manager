@@ -43,6 +43,7 @@ func New(deps Dependencies, staticDir string) *gin.Engine {
 	router.POST("/api/login", deps.Auth.Login)
 	router.POST("/api/logout", deps.Auth.Logout)
 	router.GET("/api/public/status", deps.Nodes.PublicStatus)
+	router.GET("/api/public/nodes/:id/network", deps.Nodes.PublicNetworkStatus)
 
 	protected := router.Group("/api")
 	protected.Use(middleware.RequireAuth(deps.AuthSvc))

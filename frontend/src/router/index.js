@@ -11,6 +11,7 @@ const routes = [
   { path: '/', redirect: '/dashboard' },
   { path: '/login', name: 'login', component: LoginView, meta: { requiresAuth: false } },
   { path: '/status', name: 'public-status', component: PublicStatusView, meta: { requiresAuth: false } },
+  { path: '/status/nodes/:id/network', name: 'public-node-network', component: NodeNetworkView, meta: { requiresAuth: false } },
   { path: '/dashboard', name: 'dashboard', component: DashboardView },
   { path: '/nodes', name: 'nodes', component: NodesView },
   { path: '/nodes/:id/network', name: 'node-network', component: NodeNetworkView },

@@ -139,6 +139,24 @@ func (h *NodeHandler) NetworkStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": series})
 }
 
+// PublicNetworkStatus exposes latency series without authentication.
+func (h *NodeHandler) PublicNetworkStatus(c *gin.Context) {
+	id, err := parseUintParam(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid node id"})
+		return
+	}
+
+	span := parseRangeParam(c.Query("range"))
+	series, err := h.service.GetNetworkSeries(id, span)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": series})
+}
+
 // SubmitNetworkSamples stores latency data reported by a node agent.
 func (h *NodeHandler) SubmitNetworkSamples(c *gin.Context) {
 	id, err := parseUintParam(c.Param("id"))

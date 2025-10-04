@@ -13,3 +13,5 @@ frontend/dist/
 *.iml
 .vscode/
 .idea/
+./scripts/*
+build/*

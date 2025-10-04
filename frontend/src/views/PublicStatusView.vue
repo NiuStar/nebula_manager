@@ -7,7 +7,15 @@
 
     <section class="card">
       <div class="status-grid">
-        <article v-for="node in nodes" :key="node.id" class="status-card">
+        <article
+          v-for="node in nodes"
+          :key="node.id"
+          class="status-card"
+          role="button"
+          tabindex="0"
+          @click="openNetwork(node)"
+          @keyup.enter="openNetwork(node)"
+        >
           <header class="status-card__header">
             <div>
               <h3>{{ node.name }}</h3>
@@ -68,12 +76,14 @@
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { getPublicStatus } from '../api';
 
 const nodes = ref([]);
 const REFRESH_INTERVAL = 60 * 1000;
 let refreshTimer = null;
 const statusSnapshots = new Map();
+const router = useRouter();
 
 function renderRole(role) {
   return role === 'lighthouse' ? '灯塔节点' : '普通节点';
@@ -223,6 +233,10 @@ function startAutoRefresh() {
   refreshTimer = setInterval(fetchStatus, REFRESH_INTERVAL);
 }
 
+function openNetwork(node) {
+  router.push({ name: 'public-node-network', params: { id: node.id }, query: { range: '1h' } });
+}
+
 onMounted(() => {
   fetchStatus();
   startAutoRefresh();
@@ -292,6 +306,13 @@ onBeforeUnmount(() => {
   gap: 1rem;
   border: 1px solid rgba(148, 163, 184, 0.18);
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.06);
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.status-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(148, 163, 184, 0.35);
 }
 
 .status-card__header {

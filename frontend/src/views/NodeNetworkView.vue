@@ -112,7 +112,6 @@
           <tr>
             <th>目标节点</th>
             <th>子网 IP</th>
-            <th>公网地址</th>
             <th>最近延迟 (ms)</th>
             <th>最后采样时间</th>
           </tr>
@@ -121,7 +120,6 @@
           <tr v-for="peer in peerSummaries" :key="peer.id">
             <td>{{ peer.name }}</td>
             <td>{{ peer.subnet_ip || '-' }}</td>
-            <td>{{ peer.public_ip || '-' }}</td>
             <td :class="{ failed: peer.last?.success === false }">
               <span v-if="peer.last">
                 {{ peer.last.success ? peer.last.latency_ms.toFixed(2) : '失败' }}
@@ -134,7 +132,7 @@
             </td>
           </tr>
           <tr v-if="!peerSummaries.length">
-            <td colspan="5">暂无其它节点。</td>
+            <td colspan="4">暂无其它节点。</td>
           </tr>
         </tbody>
       </table>
@@ -145,7 +143,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getNodeNetwork } from '../api';
+import { getNodeNetwork, getPublicNodeNetwork } from '../api';
 
 const router = useRouter();
 const route = useRoute();
@@ -162,6 +160,7 @@ const state = reactive({
   error: '',
   data: null
 });
+const isPublic = computed(() => route.name === 'public-node-network');
 
 const palette = ['#2563eb', '#dc2626', '#10b981', '#f59e0b', '#9333ea', '#ec4899', '#0ea5e9', '#f97316'];
 const spanLookup = {
@@ -173,7 +172,11 @@ const REFRESH_INTERVAL = 60 * 1000;
 let refreshTimer = null;
 
 function goBack() {
-  router.push({ name: 'nodes' });
+  if (isPublic.value) {
+    router.push({ name: 'public-status' });
+  } else {
+    router.push({ name: 'nodes' });
+  }
 }
 
 function setRange(value) {
@@ -198,7 +201,8 @@ async function fetchData() {
   state.loading = true;
   state.error = '';
   try {
-    const { data } = await getNodeNetwork(nodeId, state.range);
+    const request = isPublic.value ? getPublicNodeNetwork : getNodeNetwork;
+    const { data } = await request(nodeId, state.range);
     state.data = data.data;
   } catch (err) {
     state.error = err.response?.data?.error || '数据加载失败';
@@ -363,7 +367,6 @@ const peerSummaries = computed(() => {
       id: peer.peer.id,
       name: peer.peer.name,
       subnet_ip: peer.peer.subnet_ip,
-      public_ip: peer.peer.public_ip,
       last
     };
   });
