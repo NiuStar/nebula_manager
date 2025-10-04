@@ -42,6 +42,7 @@ func New(deps Dependencies, staticDir string) *gin.Engine {
 
 	router.POST("/api/login", deps.Auth.Login)
 	router.POST("/api/logout", deps.Auth.Logout)
+	router.GET("/api/public/status", deps.Nodes.PublicStatus)
 
 	protected := router.Group("/api")
 	protected.Use(middleware.RequireAuth(deps.AuthSvc))
@@ -64,6 +65,7 @@ func New(deps Dependencies, staticDir string) *gin.Engine {
 	protected.GET("/nodes/:id/install-script", deps.Nodes.InstallScript)
 	protected.GET("/nodes/:id/bundle", deps.Nodes.Bundle)
 	protected.GET("/nodes/:id/network", deps.Nodes.NetworkStatus)
+	protected.POST("/nodes/:id/status", deps.Nodes.SubmitStatus)
 	protected.GET("/nodes/:id/network/targets", deps.Nodes.NetworkTargets)
 	protected.POST("/nodes/:id/network/samples", deps.Nodes.SubmitNetworkSamples)
 	protected.DELETE("/nodes/:id", deps.Nodes.Delete)

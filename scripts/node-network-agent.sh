@@ -134,3 +134,158 @@ response=$(curl -fsS -X POST \
   }
 
 echo "[agent] 上报完成: $response"
+
+if [[ "${NEBULA_DISABLE_STATUS:-0}" != "1" ]]; then
+  if command -v python3 >/dev/null 2>&1; then
+    status_payload=$(python3 - <<'PY'
+import json
+import os
+import shutil
+import sys
+import time
+
+def read_cpu():
+    def snapshot():
+        with open('/proc/stat', 'r', encoding='utf-8') as f:
+            parts = f.readline().split()
+        values = [int(x) for x in parts[1:]]
+        idle = values[3] + values[4]
+        total = sum(values)
+        return idle, total
+
+    idle1, total1 = snapshot()
+    time.sleep(0.2)
+    idle2, total2 = snapshot()
+    total_delta = total2 - total1
+    if total_delta <= 0:
+        return 0.0
+    idle_delta = idle2 - idle1
+    usage = (1 - idle_delta / total_delta) * 100.0
+    if usage < 0:
+        usage = 0.0
+    if usage > 100:
+        usage = 100.0
+    return round(usage, 2)
+
+
+def read_mem():
+    info = {}
+    with open('/proc/meminfo', 'r', encoding='utf-8') as f:
+        for line in f:
+            if ':' not in line:
+                continue
+            key, value = line.split(':', 1)
+            try:
+                info[key] = int(value.strip().split()[0]) * 1024
+            except Exception:
+                info[key] = 0
+    total = info.get('MemTotal', 0)
+    available = info.get('MemAvailable', 0)
+    used = total - available
+    swap_total = info.get('SwapTotal', 0)
+    swap_free = info.get('SwapFree', 0)
+    swap_used = swap_total - swap_free
+    if used < 0:
+        used = 0
+    if swap_used < 0:
+        swap_used = 0
+    return total, used, swap_total, swap_used
+
+
+def read_disk():
+    try:
+        usage = shutil.disk_usage('/')
+    except Exception:
+        return 0, 0
+    return usage.total, usage.used
+
+
+def read_net():
+    rx = 0
+    tx = 0
+    with open('/proc/net/dev', 'r', encoding='utf-8') as f:
+        for line in f:
+            if ':' not in line:
+                continue
+            iface, data = line.split(':', 1)
+            fields = data.split()
+            if len(fields) < 16:
+                continue
+            try:
+                rx += int(fields[0])
+                tx += int(fields[8])
+            except Exception:
+                continue
+    return rx, tx
+
+
+def read_load():
+    try:
+        return os.getloadavg()
+    except OSError:
+        return 0.0, 0.0, 0.0
+
+
+def read_uptime():
+    try:
+        with open('/proc/uptime', 'r', encoding='utf-8') as f:
+            return int(float(f.readline().split()[0]))
+    except Exception:
+        return 0
+
+
+def read_processes():
+    try:
+        with open('/proc/loadavg', 'r', encoding='utf-8') as f:
+            parts = f.readline().split()
+        if len(parts) >= 4 and '/' in parts[3]:
+            running, total = parts[3].split('/')
+            return int(total)
+    except Exception:
+        pass
+    return 0
+
+
+try:
+    cpu = read_cpu()
+    mem_total, mem_used, swap_total, swap_used = read_mem()
+    disk_total, disk_used = read_disk()
+    net_rx, net_tx = read_net()
+    load1, load5, load15 = read_load()
+    uptime = read_uptime()
+    processes = read_processes()
+    reported_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+    payload = {
+        'cpu_usage': cpu,
+        'load1': round(load1, 2),
+        'load5': round(load5, 2),
+        'load15': round(load15, 2),
+        'memory_total': mem_total,
+        'memory_used': mem_used,
+        'swap_total': swap_total,
+        'swap_used': swap_used,
+        'disk_total': disk_total,
+        'disk_used': disk_used,
+        'net_rx_bytes': net_rx,
+        'net_tx_bytes': net_tx,
+        'processes': processes,
+        'uptime': uptime,
+        'reported_at': reported_at,
+    }
+    print(json.dumps(payload))
+except Exception:
+    pass
+PY
+    )
+    if [[ -n "$status_payload" ]]; then
+      curl -fsS -X POST \
+        -H "Authorization: Bearer ${TOKEN}" \
+        -H "Content-Type: application/json" \
+        --data "$status_payload" \
+        "$API_URL/api/nodes/${NODE_ID}/status" >/dev/null || echo "[agent] 运行状态上报失败" >&2
+    fi
+  else
+    echo "[agent] python3 不可用，跳过运行状态上报" >&2
+  fi
+fi

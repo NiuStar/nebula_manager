@@ -7,7 +7,6 @@
           <h2>网络情况 - {{ state.data?.node.name || '加载中' }}</h2>
           <p v-if="state.data" class="muted">
             子网 IP：{{ state.data.node.subnet_ip || '未配置' }}
-            <span v-if="state.data.node.public_ip">｜ 公网：{{ state.data.node.public_ip }}</span>
           </p>
         </div>
       </div>

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"nebula_manager/internal/models"
 	"nebula_manager/internal/utils"
@@ -74,18 +75,56 @@ type CreateNodeRequest struct {
 }
 
 // NodeDTO is returned to API consumers.
+type NodeStatusDTO struct {
+	CPUUsage    float64 `json:"cpu_usage"`
+	Load1       float64 `json:"load1"`
+	Load5       float64 `json:"load5"`
+	Load15      float64 `json:"load15"`
+	MemoryTotal uint64  `json:"memory_total"`
+	MemoryUsed  uint64  `json:"memory_used"`
+	SwapTotal   uint64  `json:"swap_total"`
+	SwapUsed    uint64  `json:"swap_used"`
+	DiskTotal   uint64  `json:"disk_total"`
+	DiskUsed    uint64  `json:"disk_used"`
+	NetRxBytes  uint64  `json:"net_rx_bytes"`
+	NetTxBytes  uint64  `json:"net_tx_bytes"`
+	Processes   int     `json:"processes"`
+	Uptime      uint64  `json:"uptime"`
+	ReportedAt  string  `json:"reported_at"`
+}
+
 type NodeDTO struct {
-	ID             uint     `json:"id"`
-	Name           string   `json:"name"`
-	Role           string   `json:"role"`
-	SubnetIP       string   `json:"subnet_ip"`
-	SubnetHost     string   `json:"subnet_host,omitempty"`
-	PublicIP       string   `json:"public_ip"`
-	Port           int      `json:"port"`
-	Tags           []string `json:"tags"`
-	ProxyMode      string   `json:"proxy_mode"`
-	InstallCommand string   `json:"install_command"`
-	CreatedAt      string   `json:"created_at"`
+	ID             uint           `json:"id"`
+	Name           string         `json:"name"`
+	Role           string         `json:"role"`
+	SubnetIP       string         `json:"subnet_ip"`
+	SubnetHost     string         `json:"subnet_host,omitempty"`
+	PublicIP       string         `json:"public_ip"`
+	Port           int            `json:"port"`
+	Tags           []string       `json:"tags"`
+	ProxyMode      string         `json:"proxy_mode"`
+	InstallCommand string         `json:"install_command"`
+	CreatedAt      string         `json:"created_at"`
+	Status         *NodeStatusDTO `json:"status,omitempty"`
+}
+
+// NodeStatusInput captures runtime metrics reported by a node agent.
+type NodeStatusInput struct {
+	CPUUsage    float64 `json:"cpu_usage"`
+	Load1       float64 `json:"load1"`
+	Load5       float64 `json:"load5"`
+	Load15      float64 `json:"load15"`
+	MemoryTotal uint64  `json:"memory_total"`
+	MemoryUsed  uint64  `json:"memory_used"`
+	SwapTotal   uint64  `json:"swap_total"`
+	SwapUsed    uint64  `json:"swap_used"`
+	DiskTotal   uint64  `json:"disk_total"`
+	DiskUsed    uint64  `json:"disk_used"`
+	NetRxBytes  uint64  `json:"net_rx_bytes"`
+	NetTxBytes  uint64  `json:"net_tx_bytes"`
+	Processes   int     `json:"processes"`
+	Uptime      uint64  `json:"uptime"`
+	ReportedAt  string  `json:"reported_at"`
 }
 
 // List returns all stored nodes.
@@ -94,9 +133,26 @@ func (s *NodeService) List() ([]NodeDTO, error) {
 	if err := s.db.Order("created_at desc").Find(&nodes).Error; err != nil {
 		return nil, err
 	}
-	res := make([]NodeDTO, 0, len(nodes))
-	for _, n := range nodes {
-		res = append(res, s.toNodeDTO(n))
+	res := make([]NodeDTO, len(nodes))
+	ids := make([]uint, len(nodes))
+	for i, n := range nodes {
+		res[i] = s.toNodeDTO(n)
+		ids[i] = n.ID
+	}
+	if len(ids) > 0 {
+		var statuses []models.NodeStatus
+		if err := s.db.Where("node_id IN ?", ids).Find(&statuses).Error; err != nil {
+			return nil, err
+		}
+		lookup := make(map[uint]*NodeDTO, len(res))
+		for i := range res {
+			lookup[res[i].ID] = &res[i]
+		}
+		for _, st := range statuses {
+			if dto := lookup[st.NodeID]; dto != nil {
+				dto.Status = toNodeStatusDTO(st)
+			}
+		}
 	}
 	return res, nil
 }
@@ -854,12 +910,93 @@ func (s *NodeService) RecordNetworkSamples(nodeID uint, samples []NetworkSampleI
 	return s.db.Create(&entries).Error
 }
 
+// RecordStatus upserts the runtime metrics for the given node.
+func (s *NodeService) RecordStatus(nodeID uint, input NodeStatusInput) error {
+	if _, err := s.getNode(nodeID); err != nil {
+		return err
+	}
+
+	reportedAt := time.Now()
+	if strings.TrimSpace(input.ReportedAt) != "" {
+		if parsed, err := time.Parse(time.RFC3339, input.ReportedAt); err == nil {
+			reportedAt = parsed
+		}
+	}
+
+	status := models.NodeStatus{
+		NodeID:      nodeID,
+		CPUUsage:    input.CPUUsage,
+		Load1:       input.Load1,
+		Load5:       input.Load5,
+		Load15:      input.Load15,
+		MemoryTotal: input.MemoryTotal,
+		MemoryUsed:  input.MemoryUsed,
+		SwapTotal:   input.SwapTotal,
+		SwapUsed:    input.SwapUsed,
+		DiskTotal:   input.DiskTotal,
+		DiskUsed:    input.DiskUsed,
+		NetRxBytes:  input.NetRxBytes,
+		NetTxBytes:  input.NetTxBytes,
+		Processes:   input.Processes,
+		Uptime:      input.Uptime,
+		ReportedAt:  reportedAt,
+	}
+
+	assignments := map[string]any{
+		"cpu_usage":    input.CPUUsage,
+		"load1":        input.Load1,
+		"load5":        input.Load5,
+		"load15":       input.Load15,
+		"memory_total": input.MemoryTotal,
+		"memory_used":  input.MemoryUsed,
+		"swap_total":   input.SwapTotal,
+		"swap_used":    input.SwapUsed,
+		"disk_total":   input.DiskTotal,
+		"disk_used":    input.DiskUsed,
+		"net_rx_bytes": input.NetRxBytes,
+		"net_tx_bytes": input.NetTxBytes,
+		"processes":    input.Processes,
+		"uptime":       input.Uptime,
+		"reported_at":  reportedAt,
+		"updated_at":   time.Now(),
+	}
+
+	return s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "node_id"}},
+		DoUpdates: clause.Assignments(assignments),
+	}).Create(&status).Error
+}
+
 func toNodeSummary(node models.Node) NodeSummary {
 	return NodeSummary{
 		ID:       node.ID,
 		Name:     node.Name,
 		SubnetIP: strings.TrimSpace(node.SubnetIP),
 		PublicIP: strings.TrimSpace(node.PublicIP),
+	}
+}
+
+func toNodeStatusDTO(status models.NodeStatus) *NodeStatusDTO {
+	reportedAt := ""
+	if !status.ReportedAt.IsZero() {
+		reportedAt = status.ReportedAt.Format(time.RFC3339)
+	}
+	return &NodeStatusDTO{
+		CPUUsage:    status.CPUUsage,
+		Load1:       status.Load1,
+		Load5:       status.Load5,
+		Load15:      status.Load15,
+		MemoryTotal: status.MemoryTotal,
+		MemoryUsed:  status.MemoryUsed,
+		SwapTotal:   status.SwapTotal,
+		SwapUsed:    status.SwapUsed,
+		DiskTotal:   status.DiskTotal,
+		DiskUsed:    status.DiskUsed,
+		NetRxBytes:  status.NetRxBytes,
+		NetTxBytes:  status.NetTxBytes,
+		Processes:   status.Processes,
+		Uptime:      status.Uptime,
+		ReportedAt:  reportedAt,
 	}
 }
 

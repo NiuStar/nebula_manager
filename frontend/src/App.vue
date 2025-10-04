@@ -30,8 +30,8 @@ const isAuthenticated = computed(() => Boolean(state.user));
 
 .content {
   flex: 1;
-  padding: 1.5rem;
-  max-width: 1100px;
+  padding: 1.5rem clamp(1rem, 2vw, 2rem);
+  width: min(95vw, 1400px);
   margin: 0 auto;
 }
 </style>

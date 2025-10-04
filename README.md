@@ -194,6 +194,36 @@ npm run dev
 - MySQL 用户需具备创建表、插入、更新权限；如遇连接问题，请检查 DSN、网络或防火墙设置。
 - 运行脚本时如提示权限不足，可在命令前加 `sudo`。
 
+---
+
+## 多平台打包脚本
+
+如需批量生成不同系统/架构的发布包，可执行：
+
+```bash
+./scripts/package_release.sh v1.2.3
+```
+
+- 目标包含 Linux（amd64/arm64/386）、Windows（amd64）与 macOS（amd64/arm64）。
+- 脚本会编译后端、拷贝 `README.md` 与 `config.yaml.default`（若存在）、打包 `frontend/dist`，最终产物位于 `build/packages/`。
+- 版本号参数可省略，默认为 `git describe --tags` 的结果或当前日期。
+- 需具备 Go 工具链与 Node/npm；若缺少前端构建产物，会自动执行 `npm install && npm run build`。
+
+---
+
+## 二进制安装脚本（非 Docker）
+
+若希望直接在宿主机上部署 Nebula Manager，可在仓库根目录执行：
+
+```bash
+sudo ./scripts/install_binary.sh
+```
+
+- 脚本会检测/构建前端产物与后端二进制，安装到 `/opt/nebula-manager`（可通过 `INSTALL_DIR` 环境变量覆盖）。
+- 运行过程中会提示输入 MySQL DSN、监听端口、数据目录等信息，并生成 `/etc/nebula-manager.env`。
+- 自动写入并启用 `nebula-manager.service` systemd 单元，方便 `systemctl status|restart nebula-manager` 管理。
+- 如需修改配置，请编辑 `/etc/nebula-manager.env` 后执行 `sudo systemctl restart nebula-manager`。
+
 按以上步骤，即可完成后端 API 与前端控制台的部署，并通过 Web UI 快速生成灯塔节点与普通节点的证书、配置和安装脚本，实现 Nebula 组网的集中管理。
 
 ---
@@ -217,6 +247,8 @@ npm run dev
   - `success`：本次探测是否成功。
   - `timestamp`：ISO8601 / RFC3339 格式时间戳，可选；未提供时后端会使用接收时间。
 - `GET /api/nodes/:id/network/targets`：返回推荐的探测目标（包含节点 ID、名称与地址），便于探针自动获取最新列表。
+- `POST /api/nodes/:id/status`：上报节点运行状态，字段包括 CPU/Load、内存、磁盘、Swap、网络累计字节、进程数、Uptime 等，`reported_at` 可选。
+- `GET /api/public/status`：无需登录即可获取节点状态概览，适合对外只读展示。
 
 ### 推荐的探针部署方式
 
@@ -224,7 +256,9 @@ npm run dev
 
 1. 下载并安装 `/usr/local/bin/nebula-network-agent.sh`；
 2. 写入 `/etc/nebula/nebula-network-agent.env`（自动使用后端 `NEBULA_API_BASE` 以及 `NEBULA_STATIC_TOKEN`，若存在）；
-3. 安装 `nebula-net-probe.service` 和 `nebula-net-probe.timer`，默认每分钟上报一次，并在每次执行前通过 `GET /api/nodes/:id/network/targets` 自动同步最新节点列表（如需固定目标可设置 `NEBULA_DYNAMIC_TARGETS=0`）。
+3. 安装 `nebula-net-probe.service` 和 `nebula-net-probe.timer`，默认在启动 60 秒后运行并每分钟触发一次：
+   - 执行前通过 `GET /api/nodes/:id/network/targets` 自动同步最新节点列表（可通过 `NEBULA_DYNAMIC_TARGETS=0` 关闭）；
+   - 采集 `CPU/内存/磁盘/Swap/进程/负载/网络流量/运行时长` 等信息，连同 Ping 样本一起上报控制端。
 
 若控制端未配置 `NEBULA_STATIC_TOKEN`，请在执行安装命令前导出 `NEBULA_ACCESS_TOKEN`，或稍后补充后运行：
 
@@ -252,10 +286,11 @@ export NEBULA_PEERS="2:10.10.0.12,3:10.10.0.13"                     # 目标 ID:
 
 脚本要点：
 - 使用 `ping` 测试每个目标（默认 1 包，3 秒超时，可通过 `NEBULA_AGENT_PING_COUNT` 与 `NEBULA_AGENT_PING_TIMEOUT` 调整）。
-- 默认会拉取 `GET /api/nodes/:id/network/targets`，实时刷新 `NEBULA_PEERS`（可设置 `NEBULA_DYNAMIC_TARGETS=0` 关闭）；
-- 自动组装上报格式并调用 `POST /api/nodes/:id/network/samples`。
+- 默认会拉取 `GET /api/nodes/:id/network/targets`，实时刷新 `NEBULA_PEERS`（可设置 `NEBULA_DYNAMIC_TARGETS=0` 关闭）。
+- 自动汇总节点运行状态（CPU、内存、磁盘、Swap、网络累计字节、平均负载、进程数、Uptime），并调用 `POST /api/nodes/:id/status` 上报。
 - 推荐使用全局 `NEBULA_STATIC_TOKEN` 作为访问凭据，避免会话 token 过期导致探针上报失败。
 - 支持在 Nebula overlay 内使用子网 IP 直接探测，也可以配置公网地址或任意可达的探测目标。
+- 脚本依赖 `python3` 用于解析 `/proc` 指标，若节点缺少 python 会提示“跳过运行状态上报”。
 
 示例 systemd timer：
 

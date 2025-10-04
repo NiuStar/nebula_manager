@@ -26,6 +26,7 @@ export const getInstallScript = (id) => client.get(`/nodes/${id}/install-script`
 export const getNodeNetwork = (id, range) => client.get(`/nodes/${id}/network`, { params: range ? { range } : {} });
 export const submitNodeNetworkSamples = (id, payload) => client.post(`/nodes/${id}/network/samples`, payload);
 export const getNodeNetworkTargets = (id) => client.get(`/nodes/${id}/network/targets`);
+export const getPublicStatus = () => client.get('/public/status');
 export const deleteNode = (id) => client.delete(`/nodes/${id}`);
 export const login = (payload) => client.post('/login', payload);
 export const logout = () => client.post('/logout');

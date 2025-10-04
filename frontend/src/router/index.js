@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import DashboardView from '../views/DashboardView.vue';
 import NodesView from '../views/NodesView.vue';
 import TemplatesView from '../views/TemplatesView.vue';
+import PublicStatusView from '../views/PublicStatusView.vue';
 import NodeNetworkView from '../views/NodeNetworkView.vue';
 import LoginView from '../views/LoginView.vue';
 import { useAuth } from '../composables/useAuth';
@@ -9,6 +10,7 @@ import { useAuth } from '../composables/useAuth';
 const routes = [
   { path: '/', redirect: '/dashboard' },
   { path: '/login', name: 'login', component: LoginView, meta: { requiresAuth: false } },
+  { path: '/status', name: 'public-status', component: PublicStatusView, meta: { requiresAuth: false } },
   { path: '/dashboard', name: 'dashboard', component: DashboardView },
   { path: '/nodes', name: 'nodes', component: NodesView },
   { path: '/nodes/:id/network', name: 'node-network', component: NodeNetworkView },

@@ -66,15 +66,18 @@ const onSubmit = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  background: radial-gradient(circle at top, rgba(148, 163, 184, 0.35), rgba(15, 23, 42, 0.4)), #e2e8f0;
+  backdrop-filter: blur(24px);
 }
 
 .login-card {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 12px;
-  padding: 2.5rem 2.75rem;
-  width: min(420px, 90%);
-  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25);
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 18px;
+  padding: 2.6rem 2.9rem;
+  width: min(420px, 92%);
+  box-shadow: 0 25px 55px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
 }
 
 .title {
@@ -103,7 +106,7 @@ const onSubmit = async () => {
 .field input {
   padding: 0.65rem 0.75rem;
   border-radius: 6px;
-  border: 1px solid #cbd5f5;
+  border: 1px solid rgba(148, 163, 184, 0.6);
   font-size: 0.95rem;
   transition: border-color 0.2s ease;
 }

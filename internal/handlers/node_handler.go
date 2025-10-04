@@ -163,6 +163,28 @@ func (h *NodeHandler) SubmitNetworkSamples(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": "ok"})
 }
 
+// SubmitStatus stores runtime metrics reported by a node agent.
+func (h *NodeHandler) SubmitStatus(c *gin.Context) {
+	id, err := parseUintParam(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid node id"})
+		return
+	}
+
+	var req services.NodeStatusInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.RecordStatus(id, req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": "ok"})
+}
+
 // NetworkTargets lists recommended probe targets for the node agent.
 func (h *NodeHandler) NetworkTargets(c *gin.Context) {
 	id, err := parseUintParam(c.Param("id"))
@@ -178,6 +200,29 @@ func (h *NodeHandler) NetworkTargets(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": targets})
+}
+
+// PublicStatus exposes node status for unauthenticated visitors.
+func (h *NodeHandler) PublicStatus(c *gin.Context) {
+	nodes, err := h.service.List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	result := make([]gin.H, 0, len(nodes))
+	for _, node := range nodes {
+		result = append(result, gin.H{
+			"id":         node.ID,
+			"name":       node.Name,
+			"role":       node.Role,
+			"subnet_ip":  node.SubnetIP,
+			"public_ip":  node.PublicIP,
+			"status":     node.Status,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
 func parseUintParam(val string) (uint, error) {
